@@ -1,6 +1,8 @@
 import subprocess
 from pathlib import Path
 
+import docker as docker_sdk
+
 REPOS_DIR = Path("/repos")
 
 
@@ -14,26 +16,35 @@ def _run(cmd: list) -> tuple[str, int]:
 
 def clean_docker() -> str:
     lines = []
+    try:
+        client = docker_sdk.from_env()
 
-    out, _ = _run(["docker", "image", "prune", "-f"])
-    lines.append(f"Images: {out or 'nothing removed'}")
+        # Dangling images
+        pruned = client.images.prune(filters={"dangling": True})
+        reclaimed = pruned.get("SpaceReclaimed", 0)
+        deleted = len(pruned.get("ImagesDeleted") or [])
+        lines.append(f"Images: removed {deleted} ({reclaimed // 1024 // 1024}MB reclaimed)")
 
-    stopped_out, _ = _run(["docker", "ps", "-a", "--filter", "status=exited", "--format", "{{.ID}} {{.Names}}"])
-    if stopped_out:
+        # Stopped containers
+        stopped = client.containers.list(filters={"status": "exited"})
         removed = []
-        for line in stopped_out.splitlines():
-            parts = line.split()
-            if len(parts) < 2:
-                continue
-            cid, name = parts[0], parts[1]
-            _, code = _run(["docker", "rm", cid])
-            removed.append(f"{name}({'ok' if code == 0 else 'fail'})")
-        lines.append(f"Containers: {', '.join(removed)}")
-    else:
-        lines.append("Containers: none stopped")
+        for c in stopped:
+            try:
+                name = c.name
+                c.remove()
+                removed.append(f"{name}(ok)")
+            except Exception as e:
+                removed.append(f"{c.name}(fail:{e})")
+        lines.append(f"Containers: {', '.join(removed) if removed else 'none stopped'}")
 
-    vol_out, _ = _run(["docker", "volume", "prune", "-f"])
-    lines.append(f"Volumes: {vol_out or 'nothing removed'}")
+        # Unused volumes
+        pruned_v = client.volumes.prune()
+        vols = len(pruned_v.get("VolumesDeleted") or [])
+        lines.append(f"Volumes: removed {vols}")
+
+        client.close()
+    except Exception as e:
+        lines.append(f"Docker error: {e}")
 
     return "\n".join(lines)
 
