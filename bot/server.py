@@ -95,8 +95,8 @@ async def interactions(request: Request):
         app_id = data.get("application_id", APP_ID)
         channel_id = data.get("channel_id", "")
 
-        if command == "housekeeping" and channel_id == BOT_COMMANDS_CHANNEL:
-            log.info("Slash command: /housekeeping")
+        if command == "audit" and channel_id == BOT_COMMANDS_CHANNEL:
+            log.info("Slash command: /audit")
             asyncio.create_task(_run_housekeeping_command(app_id, token, channel_id))
             return {"type": 5}
 

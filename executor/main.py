@@ -290,7 +290,7 @@ async def _run_task(task: str, params: dict) -> None:
         if not plan:
             await _post_discord("❌ Could not read plan from thread.", reply_channel)
             return
-        prompt = f"Implement this plan exactly as described. Commit and push any code changes.\n\n{plan}"
+        prompt = f"Implement this plan exactly as described. Commit and push any code changes. Do not post to Discord or send any notifications.\n\n{plan}"
         msg_id = await _post_discord("⚙️ Implementing plan...", reply_channel)
         output, returncode = await _run_claude_streaming(
             prompt, reply_channel, msg_id, label="Implementing plan", timeout=600
