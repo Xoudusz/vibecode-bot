@@ -16,9 +16,10 @@ APP_ID = os.environ["DISCORD_APPLICATION_ID"]
 EXECUTOR_URL = os.environ.get("EXECUTOR_URL", "")
 EXECUTOR_TOKEN = os.environ.get("EXECUTOR_TOKEN", "")
 FOLLOWUP_URL = "https://discord.com/api/v10/webhooks/{app_id}/{token}"
+BOT_COMMANDS_CHANNEL = "1534613643533095023"
 
 # Tasks routed to executor (require Claude/local filesystem)
-EXECUTOR_TASKS = {"fix_memory", "investigate_ci", "create_doc", "docker_cleanup"}
+EXECUTOR_TASKS = {"fix_memory", "investigate_ci", "create_doc", "docker_cleanup", "run_housekeeping"}
 
 app = FastAPI(title="vibecode-bot")
 
@@ -54,7 +55,10 @@ async def _run_cleanup_and_reply(app_id: str, token: str, custom_id: str, channe
             except Exception as e:
                 result = f"Error: {e}"
 
-    payload = {"content": f"```\n{result[:1900]}\n```"}
+    if custom_id == "run_housekeeping":
+        payload = {"content": "Audit running — check <#1534601541736988862>", "flags": 64}
+    else:
+        payload = {"content": f"```\n{result[:1900]}\n```"}
     async with httpx.AsyncClient() as client:
         resp = await client.post(url, json=payload)
         if not resp.is_success:
@@ -75,6 +79,19 @@ async def interactions(request: Request):
 
     if interaction_type == 1:
         return {"type": 1}
+
+    if interaction_type == 2:
+        command = data.get("data", {}).get("name", "")
+        token = data.get("token", "")
+        app_id = data.get("application_id", APP_ID)
+        channel_id = data.get("channel_id", "")
+
+        if command == "housekeeping" and channel_id == BOT_COMMANDS_CHANNEL:
+            log.info("Slash command: /housekeeping")
+            asyncio.create_task(_run_cleanup_and_reply(app_id, token, "run_housekeeping", channel_id))
+            return {"type": 5}
+
+        return {"type": 4, "data": {"content": "Unknown command.", "flags": 64}}
 
     if interaction_type == 3:
         custom_id = data.get("data", {}).get("custom_id", "")
