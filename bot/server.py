@@ -39,6 +39,14 @@ async def _call_executor(custom_id: str, params: dict = {}) -> str:
         return f"Executor error: {resp.status_code}"
 
 
+async def _run_housekeeping_command(app_id: str, token: str, channel_id: str) -> None:
+    await _call_executor("run_housekeeping", params={
+        "reply_channel_id": channel_id,
+        "interaction_token": token,
+        "app_id": app_id,
+    })
+
+
 async def _run_cleanup_and_reply(app_id: str, token: str, custom_id: str, channel_id: str) -> None:
     url = FOLLOWUP_URL.format(app_id=app_id, token=token)
 
@@ -55,10 +63,7 @@ async def _run_cleanup_and_reply(app_id: str, token: str, custom_id: str, channe
             except Exception as e:
                 result = f"Error: {e}"
 
-    if custom_id == "run_housekeeping":
-        payload = {"content": "Audit running — check <#1534601541736988862>", "flags": 64}
-    else:
-        payload = {"content": f"```\n{result[:1900]}\n```"}
+    payload = {"content": f"```\n{result[:1900]}\n```"}
     async with httpx.AsyncClient() as client:
         resp = await client.post(url, json=payload)
         if not resp.is_success:
@@ -88,7 +93,7 @@ async def interactions(request: Request):
 
         if command == "housekeeping" and channel_id == BOT_COMMANDS_CHANNEL:
             log.info("Slash command: /housekeeping")
-            asyncio.create_task(_run_cleanup_and_reply(app_id, token, "run_housekeeping", channel_id))
+            asyncio.create_task(_run_housekeeping_command(app_id, token, channel_id))
             return {"type": 5}
 
         return {"type": 4, "data": {"content": "Unknown command.", "flags": 64}}
