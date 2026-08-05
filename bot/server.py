@@ -19,7 +19,11 @@ FOLLOWUP_URL = "https://discord.com/api/v10/webhooks/{app_id}/{token}"
 BOT_COMMANDS_CHANNEL = "1534613643533095023"
 
 # Tasks routed to executor (require Claude/local filesystem)
-EXECUTOR_TASKS = {"fix_memory", "investigate_ci", "create_doc", "docker_cleanup", "run_housekeeping"}
+EXECUTOR_TASKS = {
+    "fix_memory", "investigate_ci", "create_doc", "docker_cleanup",
+    "run_housekeeping", "create_docs", "review_projects",
+    "approve_plan", "reject_plan",
+}
 
 app = FastAPI(title="vibecode-bot")
 
