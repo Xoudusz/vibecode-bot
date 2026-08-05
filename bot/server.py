@@ -38,11 +38,11 @@ async def _call_executor(custom_id: str, params: dict = {}) -> str:
         return f"Executor error: {resp.status_code}"
 
 
-async def _run_cleanup_and_reply(app_id: str, token: str, custom_id: str) -> None:
+async def _run_cleanup_and_reply(app_id: str, token: str, custom_id: str, channel_id: str) -> None:
     url = FOLLOWUP_URL.format(app_id=app_id, token=token)
 
     if custom_id in EXECUTOR_TASKS:
-        result = await _call_executor(custom_id)
+        result = await _call_executor(custom_id, params={"reply_channel_id": channel_id})
     else:
         handler = HANDLERS.get(custom_id)
         if handler is None:
@@ -81,8 +81,9 @@ async def interactions(request: Request):
         token = data.get("token", "")
         app_id = data.get("application_id", APP_ID)
 
-        log.info("Button pressed: %s", custom_id)
-        asyncio.create_task(_run_cleanup_and_reply(app_id, token, custom_id))
+        channel_id = data.get("channel_id", "")
+        log.info("Button pressed: %s (channel: %s)", custom_id, channel_id)
+        asyncio.create_task(_run_cleanup_and_reply(app_id, token, custom_id, channel_id))
         return {"type": 5}
 
     return {"type": 1}
