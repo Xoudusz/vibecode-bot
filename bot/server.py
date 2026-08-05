@@ -13,24 +13,48 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 log = logging.getLogger(__name__)
 
 APP_ID = os.environ["DISCORD_APPLICATION_ID"]
+EXECUTOR_URL = os.environ.get("EXECUTOR_URL", "")
+EXECUTOR_TOKEN = os.environ.get("EXECUTOR_TOKEN", "")
 FOLLOWUP_URL = "https://discord.com/api/v10/webhooks/{app_id}/{token}"
+
+# Tasks routed to executor (require Claude/local filesystem)
+EXECUTOR_TASKS = {"fix_memory", "investigate_ci", "create_doc", "docker_cleanup"}
 
 app = FastAPI(title="vibecode-bot")
 
 
-async def _run_cleanup_and_reply(app_id: str, token: str, custom_id: str) -> None:
-    handler = HANDLERS.get(custom_id)
-    if handler is None:
-        result = f"Unknown action: {custom_id}"
-    else:
-        try:
-            loop = asyncio.get_event_loop()
-            result = await loop.run_in_executor(None, handler)
-        except Exception as e:
-            result = f"Error: {e}"
+async def _call_executor(custom_id: str, params: dict = {}) -> str:
+    if not EXECUTOR_URL or not EXECUTOR_TOKEN:
+        return "Executor not configured"
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            f"{EXECUTOR_URL}/execute",
+            json={"task": custom_id, "params": params},
+            headers={"Authorization": f"Bearer {EXECUTOR_TOKEN}"},
+            timeout=10,
+        )
+        if resp.is_success:
+            return f"Queued: `{custom_id}`"
+        return f"Executor error: {resp.status_code}"
 
+
+async def _run_cleanup_and_reply(app_id: str, token: str, custom_id: str) -> None:
     url = FOLLOWUP_URL.format(app_id=app_id, token=token)
-    payload = {"content": f"```\n{result[:1900]}\n```", "flags": 64}  # ephemeral
+
+    if custom_id in EXECUTOR_TASKS:
+        result = await _call_executor(custom_id)
+    else:
+        handler = HANDLERS.get(custom_id)
+        if handler is None:
+            result = f"Unknown action: {custom_id}"
+        else:
+            try:
+                loop = asyncio.get_event_loop()
+                result = await loop.run_in_executor(None, handler)
+            except Exception as e:
+                result = f"Error: {e}"
+
+    payload = {"content": f"```\n{result[:1900]}\n```", "flags": 64}
     async with httpx.AsyncClient() as client:
         resp = await client.post(url, json=payload)
         if not resp.is_success:
@@ -49,11 +73,9 @@ async def interactions(request: Request):
     data = json.loads(body)
     interaction_type = data.get("type")
 
-    # Discord PING
     if interaction_type == 1:
         return {"type": 1}
 
-    # Button component interaction
     if interaction_type == 3:
         custom_id = data.get("data", {}).get("custom_id", "")
         token = data.get("token", "")
@@ -61,7 +83,7 @@ async def interactions(request: Request):
 
         log.info("Button pressed: %s", custom_id)
         asyncio.create_task(_run_cleanup_and_reply(app_id, token, custom_id))
-        return {"type": 5}  # deferred update
+        return {"type": 5}
 
     return {"type": 1}
 
