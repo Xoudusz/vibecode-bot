@@ -54,7 +54,7 @@ async def _run_cleanup_and_reply(app_id: str, token: str, custom_id: str) -> Non
             except Exception as e:
                 result = f"Error: {e}"
 
-    payload = {"content": f"```\n{result[:1900]}\n```", "flags": 64}
+    payload = {"content": f"```\n{result[:1900]}\n```"}
     async with httpx.AsyncClient() as client:
         resp = await client.post(url, json=payload)
         if not resp.is_success:
