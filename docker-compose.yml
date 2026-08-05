@@ -1,0 +1,13 @@
+services:
+  vibecode-bot:
+    image: ghcr.io/xoudusz/vibecode-bot:latest
+    container_name: vibecode-bot
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /root/projects/repos:/repos
+    environment:
+      - DISCORD_PUBLIC_KEY=${DISCORD_PUBLIC_KEY}
+      - DISCORD_APPLICATION_ID=${DISCORD_APPLICATION_ID}

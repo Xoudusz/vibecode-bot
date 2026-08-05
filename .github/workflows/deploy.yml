@@ -1,0 +1,114 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  packages: write
+
+concurrency:
+  group: deploy-main
+  cancel-in-progress: true
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read version
+        id: ver
+        run: |
+          VER=$(cat VERSION)
+          echo "version=$VER" >> $GITHUB_OUTPUT
+          echo "major_minor=$(echo $VER | cut -d. -f1-2)" >> $GITHUB_OUTPUT
+
+      - name: Check if version already released
+        id: check
+        run: |
+          if git ls-remote --tags origin "refs/tags/v${{ steps.ver.outputs.version }}" | grep -q .; then
+            echo "new=false" >> $GITHUB_OUTPUT
+          else
+            echo "new=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build Docker tags
+        id: tags
+        run: |
+          VER="${{ steps.ver.outputs.version }}"
+          MM="${{ steps.ver.outputs.major_minor }}"
+          SHA=$(echo "$GITHUB_SHA" | cut -c1-7)
+          TAGS="ghcr.io/xoudusz/vibecode-bot:latest,ghcr.io/xoudusz/vibecode-bot:sha-$SHA"
+          if [ "${{ steps.check.outputs.new }}" = "true" ]; then
+            TAGS="$TAGS,ghcr.io/xoudusz/vibecode-bot:$VER,ghcr.io/xoudusz/vibecode-bot:$MM"
+          fi
+          echo "tags=$TAGS" >> $GITHUB_OUTPUT
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          build-args: GIT_COMMIT=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Tag and release
+        if: steps.check.outputs.new == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VER: ${{ steps.ver.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag "v$VER"
+          git push origin "v$VER"
+
+          PREV=$(git describe --tags --abbrev=0 HEAD~1 2>/dev/null || true)
+          RANGE="${PREV:+$PREV..HEAD}"
+          RANGE="${RANGE:-HEAD}"
+
+          feats="" fixes="" other=""
+          _CC_RE='^([a-z]+)(\([^)]+\))?!?:\ (.+)$'
+          while IFS= read -r line; do
+            [[ -z "$line" ]] && continue
+            if [[ "$line" =~ $_CC_RE ]]; then
+              prefix="${BASH_REMATCH[1]}"
+              msg="${BASH_REMATCH[3]}"
+            else
+              prefix=""; msg="$line"
+            fi
+            case "$prefix" in
+              feat|feature) feats="${feats}- $msg\n" ;;
+              fix|bugfix)   fixes="${fixes}- $msg\n" ;;
+              *)            other="${other}- $line\n" ;;
+            esac
+          done < <(git log "$RANGE" --format='%s' --no-merges 2>/dev/null)
+
+          body=""
+          [ -n "$feats" ] && body="${body}## Features\n${feats}\n"
+          [ -n "$fixes" ] && body="${body}## Fixes\n${fixes}\n"
+          [ -n "$other" ] && body="${body}## Other\n${other}\n"
+          [ -z "$body"  ] && body="Automated release.\n"
+
+          printf "%b" "$body" > /tmp/release_notes.txt
+          gh release create "v$VER" --title "v$VER" --notes-file /tmp/release_notes.txt
