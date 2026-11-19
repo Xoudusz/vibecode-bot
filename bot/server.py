@@ -27,6 +27,25 @@ EXECUTOR_TASKS = {
 
 app = FastAPI(title="vibecode-bot")
 
+NOT_ALLOWED = {"type": 4, "data": {"content": "Not allowed.", "flags": 64}}
+
+
+def _owner_ids() -> set[str]:
+    """Discord user IDs allowed to trigger commands/buttons. Empty = deny all."""
+    return {i.strip() for i in os.environ.get("OWNER_IDS", "").split(",") if i.strip()}
+
+
+def _user_id(data: dict) -> str:
+    """Invoking user: member.user in guilds, user in DMs. "" if unknown."""
+    if "member" in data:
+        member = data["member"]
+        user = member.get("user") if isinstance(member, dict) else None
+    else:
+        user = data.get("user")
+    if not isinstance(user, dict):
+        return ""
+    return str(user.get("id") or "")
+
 
 async def _call_executor(custom_id: str, params: dict = {}) -> str:
     if not EXECUTOR_URL or not EXECUTOR_TOKEN:
@@ -88,6 +107,16 @@ async def interactions(request: Request):
 
     if interaction_type == 1:
         return {"type": 1}
+
+    if interaction_type in (2, 3):
+        user_id = _user_id(data)
+        if not user_id or user_id not in _owner_ids():
+            inner = data.get("data") if isinstance(data.get("data"), dict) else {}
+            log.warning(
+                "Denied interaction type %s from user %s (%s)", interaction_type, user_id or "?",
+                inner.get("custom_id") or inner.get("name", ""),
+            )
+            return NOT_ALLOWED
 
     if interaction_type == 2:
         command = data.get("data", {}).get("name", "")

@@ -22,7 +22,9 @@ DISCORD_BOT_TOKEN = os.environ.get("DISCORD_BOT_TOKEN", "")
 DISCORD_CHANNEL_ID = os.environ.get("DISCORD_CHANNEL_ID", "")
 PROJECT_PLANS_CHANNEL = os.environ.get("DISCORD_PROJECT_PLANS_CHANNEL", "1534627545495113828")
 GUILD_ID = "1145020158579052624"
-CLAUDE_BIN = "/usr/local/bin/claude"
+CLAUDE_BIN = os.environ.get("CLAUDE_BIN", "/root/.local/bin/claude")
+BOT_USER_ID = os.environ.get("DISCORD_BOT_USER_ID") or "1534584791910056097"
+OWNER_IDS = {i.strip() for i in os.environ.get("OWNER_IDS", "").split(",") if i.strip()}
 
 TASKS: dict[str, str] = {
     "fix_memory": (
@@ -216,16 +218,29 @@ async def _post_plan_thread(plan_content: str) -> str:
 
 
 async def _fetch_thread_content(channel_id: str) -> str:
-    """Fetch plan content from a thread (content or embed description)."""
+    """Fetch plan content from a thread (content or embed description).
+
+    Only messages from the bot itself or an owner count: anything else in the
+    thread would become part of a root Claude prompt.
+    """
     async with httpx.AsyncClient() as client:
-        resp = await client.get(
-            f"https://discord.com/api/v10/channels/{channel_id}/messages?limit=5",
-            headers=_BOT_HEADERS,
-        )
+        trusted = (OWNER_IDS | {BOT_USER_ID}) - {""}
+        try:
+            resp = await client.get(
+                f"https://discord.com/api/v10/channels/{channel_id}/messages?limit=5",
+                headers=_BOT_HEADERS,
+            )
+        except httpx.HTTPError as e:
+            log.error("Fetching plan thread %s failed: %s", channel_id, e)
+            return ""
         if resp.is_success:
             msgs = resp.json()
             parts = []
             for m in reversed(msgs):
+                author_id = str((m.get("author") or {}).get("id", ""))
+                if author_id not in trusted:
+                    log.warning("Skipping plan-thread message from untrusted author %s", author_id or "?")
+                    continue
                 if m.get("content"):
                     parts.append(m["content"])
                 for e in m.get("embeds", []):
